@@ -34,6 +34,9 @@ rich = "^13.9.2"
 networkx = "^3.4.2"
 textual = "^0.62.0"
 
+[tool.poetry.extras]
+orchestration = ["prefect", "networkx"]
+
 [tool.poetry.scripts]
 mxm-pipeline = "mxm.pipeline.cli:app"
 
