@@ -1,3 +1,3 @@
-from .spec import AssetDecl, TaskSpec, FlowSpec
+from .spec import AssetDecl, FlowSpec, TaskSpec
 
-__all__ = ["AssetDecl", "TaskSpec", "FlowSpec"]
+__all__ = ["AssetDecl", "FlowSpec", "TaskSpec"]
