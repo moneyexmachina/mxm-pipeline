@@ -1,0 +1,26 @@
+name: Daily Smoke
+
+on:
+  schedule:
+    - cron: '30 5 * * *'  # ~06:30 CET (05:30 UTC)
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: abatilo/actions-poetry@v2
+        with:
+          poetry-version: '2.2.1'
+      - run: poetry install --no-interaction --no-ansi
+      - name: CLI smoke
+        run: |
+          poetry run mxm-pipeline list
+          poetry run mxm-pipeline graph justetf
+          poetry run mxm-pipeline run justetf --params '{"as_of":"2025-11-11"}'
