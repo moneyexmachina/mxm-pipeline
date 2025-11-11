@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Callable, List
+from collections.abc import Callable
 
 import pytest
 
@@ -14,7 +14,7 @@ def _no_op() -> int:
     return 42
 
 
-def _counting_factory(counter: List[int]) -> Callable[[], int]:
+def _counting_factory(counter: list[int]) -> Callable[[], int]:
     def _fn() -> int:
         counter.append(1)
         return len(counter)
@@ -24,7 +24,7 @@ def _counting_factory(counter: List[int]) -> Callable[[], int]:
 
 def test_build_returns_callable_and_does_not_execute_user_code() -> None:
     # A1 — Build returns a callable Prefect flow and does not run task fns
-    side_effects: List[int] = []
+    side_effects: list[int] = []
     t = TaskSpec(name="t1", fn=_counting_factory(side_effects))
     flow_spec = FlowSpec(name="demo-flow", tasks=[t])
 
