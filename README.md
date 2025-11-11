@@ -1,3 +1,6 @@
+[![CI](https://github.com/moneyexmachina/mxm-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/moneyexmachina/mxm-pipeline/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 # mxm-pipeline
 
 **Prefect-backed orchestration • CLI/TUI-first • Provenance everywhere • Optional asset sidecars**
