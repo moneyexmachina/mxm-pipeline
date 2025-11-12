@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os as _os
 
 # Disable Prefect's console logging/UI/API globally for test & local runs
 _os.environ.setdefault("PREFECT_LOGGING_TO_CONSOLE", "false")
 _os.environ.setdefault("PREFECT_UI_ENABLED", "false")
 _os.environ.setdefault("PREFECT_API_ENABLE", "false")
+from collections.abc import Callable, Iterable, Mapping
 import inspect
 import logging
 from typing import (
@@ -15,7 +17,6 @@ from typing import (
     cast,
     runtime_checkable,
 )
-from collections.abc import Callable, Iterable, Mapping
 
 from mxm.pipeline.spec import AssetDecl, FlowSpec, TaskSpec
 from mxm.pipeline.types import JSONValue
@@ -193,7 +194,6 @@ def _resolve_value(maybe_future: Any) -> Any:
 
 
 # --- Logging silencer for Prefect/Rich console --------------------------------
-from contextlib import contextmanager
 
 
 @contextmanager
@@ -264,7 +264,7 @@ def run_prefect_flow(
     flow_dec = _require_prefect_flow()
     task_dec = _require_prefect_task()
 
-    # Quiet Prefect’s API/UI + reduce logging noise (best-effort)
+    # Quiet Prefect's API/UI + reduce logging noise (best-effort)
     try:
         from prefect.settings import (
             PREFECT_API_ENABLE,
@@ -306,7 +306,9 @@ def run_prefect_flow(
             name=spec.name,
             retries=max(0, int(spec.retries)),
             retry_delay_seconds=max(0, int(spec.retry_delay_s)),
-        )(spec.fn)  # type: ignore[misc]
+        )(
+            spec.fn
+        )  # type: ignore[misc]
 
     @flow_dec(name=flow_spec.name)
     def _mxm_run(**runtime_params: dict[str, JSONValue]) -> dict[str, Any]:
