@@ -1,3 +1,16 @@
+"""
+End-to-end execution tests for MXM flows using the Prefect adapter.
+
+These tests go through:
+    FlowSpec -> build_mxm_flow_for_prefect -> MXMFlow.execute
+and verify:
+    - dependency wiring
+    - parameter precedence
+    - retries
+    - fan-in ordering
+    - asset logging
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -93,7 +106,7 @@ def test_run_executes_dependencies_and_returns_results() -> None:
     tB = TaskSpec(name="B", fn=make_add1(order, "B", 10), upstream=["A"])
     tC = TaskSpec(name="C", fn=make_add1(order, "C", 100), upstream=["B"])
     spec = FlowSpec(name="chain", tasks=[tA, tB, tC])
-    results = prefect_adapter.run_prefect_flow(spec, params={})
+    results = prefect_adapter.run_mxm_flow_for_prefect(spec, params={})
     assert results["A"] == 1
     assert results["B"] == 11
     assert results["C"] == 111
@@ -104,7 +117,7 @@ def test_run_passes_runtime_and_task_params_with_precedence() -> None:
     order: list[str] = []
     t = TaskSpec(name="T", fn=make_add_k0(order, "T"), params={"k": 3})
     spec = FlowSpec(name="params-flow", params={"k": 5}, tasks=[t])
-    results = prefect_adapter.run_prefect_flow(spec, params={"k": 7})
+    results = prefect_adapter.run_mxm_flow_for_prefect(spec, params={"k": 7})
     assert results["T"] == 7
     assert order == ["T"]
 
@@ -119,7 +132,7 @@ def test_run_retries_and_succeeds_within_limits() -> None:
         retry_delay_s=0,
     )
     spec = FlowSpec(name="retry-flow", tasks=[t])
-    results = prefect_adapter.run_prefect_flow(spec, params={})
+    results = prefect_adapter.run_mxm_flow_for_prefect(spec, params={})
     assert results["F"] == 2
     assert order.count("F") >= 2
 
@@ -135,7 +148,7 @@ def test_run_fails_when_retries_exceeded() -> None:
     )
     spec = FlowSpec(name="retry-fail", tasks=[t])
     with pytest.raises(RuntimeError):
-        _ = prefect_adapter.run_prefect_flow(spec, params={})
+        _ = prefect_adapter.run_mxm_flow_for_prefect(spec, params={})
     assert attempts["F"] >= 3
 
 
@@ -146,7 +159,7 @@ def test_run_parallel_branches_converge_topologically() -> None:
     tC = TaskSpec(name="C", fn=make_add1(order, "C", 5), upstream=["A"])
     tD = TaskSpec(name="D", fn=make_add2(order, "D"), upstream=["B", "C"])
     spec = FlowSpec(name="fan-in", tasks=[tA, tB, tC, tD])
-    results = prefect_adapter.run_prefect_flow(spec, params={})
+    results = prefect_adapter.run_mxm_flow_for_prefect(spec, params={})
     assert results["A"] == 2
     assert results["B"] == 5
     assert results["C"] == 7
@@ -164,7 +177,9 @@ def test_run_emits_asset_log_line(caplog: pytest.LogCaptureFixture) -> None:
     t = TaskSpec(name="W", fn=make_const(order, "W", 1), produces=asset)
     spec = FlowSpec(name="assets", tasks=[t])
     with caplog.at_level("INFO"):
-        results = prefect_adapter.run_prefect_flow(spec, params={"as_of": "2025-11-11"})
+        results = prefect_adapter.run_mxm_flow_for_prefect(
+            spec, params={"as_of": "2025-11-11"}
+        )
     assert results["W"] == 1
     messages = " ".join(r.getMessage() for r in caplog.records)
     assert "ASSET write" in messages

@@ -33,6 +33,7 @@ typer = "~0.19.0"
 rich = "^13.9.2"
 networkx = "^3.4.2"
 textual = "^0.62.0"
+mxm-types = "^0.1.0"
 
 [tool.poetry.extras]
 orchestration = ["prefect", "networkx"]

@@ -7,6 +7,8 @@ import pytest
 
 from mxm.pipeline.adapters import prefect_adapter
 from mxm.pipeline.spec import AssetDecl, FlowSpec, TaskSpec
+from mxm.pipeline.types import MXMFlow
+from mxm.types import JSONObj
 
 
 def _no_op() -> int:
@@ -20,6 +22,26 @@ def _counting_factory(counter: list[int]) -> Callable[[], int]:
         return len(counter)
 
     return _fn
+
+
+def test_build_mxm_flow_for_prefect_returns_mxmflow_and_is_pure() -> None:
+    counter = {"n": 0}
+
+    def _side_effect_task(params: JSONObj) -> int:
+        counter["n"] += 1
+        return 1
+
+    t = TaskSpec(name="t1", fn=_side_effect_task)
+    flow_spec = FlowSpec(name="demo-mxm", tasks=[t])
+
+    flow = prefect_adapter.build_mxm_flow_for_prefect(flow_spec)
+
+    # MXM-facing contract
+    assert isinstance(flow, MXMFlow)
+    assert flow.name == flow_spec.name
+    assert flow.backend == "prefect"
+    # Build must not execute the function
+    assert counter["n"] == 0
 
 
 def test_build_returns_callable_and_does_not_execute_user_code() -> None:
