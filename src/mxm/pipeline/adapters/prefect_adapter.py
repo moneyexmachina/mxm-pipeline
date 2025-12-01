@@ -14,14 +14,17 @@ from typing import (
     Any,
     Protocol,
     TypeVar,
-    cast,
     runtime_checkable,
 )
 
 from mxm.pipeline.spec import AssetDecl, FlowSpec, TaskSpec
-from mxm.pipeline.types import JSONValue
+from mxm.pipeline.types import BackendName, MXMFlow, RunOptions
+from mxm.types import JSONMap, JSONObj, JSONValue
 
-__all__ = ["build_prefect_flow", "run_prefect_flow"]
+__all__ = [
+    "PrefectMXMFlow",
+    "build_mxm_flow_for_prefect",
+]
 
 
 # --- Minimal typing for Prefect's @flow decorator ----------------------------
@@ -143,22 +146,25 @@ def _toposort(by_name: Mapping[str, TaskSpec]) -> list[str]:
 
 
 def _merge_params(
-    task: TaskSpec, flow: FlowSpec, runtime: Mapping[str, JSONValue]
-) -> dict[str, JSONValue]:
+    task: TaskSpec,
+    flow: FlowSpec,
+    runtime: JSONObj,
+) -> JSONMap:
     """Precedence: runtime > flow.params > task.params."""
-    merged: dict[str, JSONValue] = {}
+    merged: JSONMap = {}
     merged.update(task.params or {})
     merged.update(flow.params or {})
-    merged.update(dict(runtime))
+    merged.update(runtime)
     return merged
 
 
 def _filter_kwargs(
-    fn: Callable[..., Any], kwargs: Mapping[str, JSONValue]
-) -> dict[str, JSONValue]:
+    fn: Callable[..., Any],
+    kwargs: JSONObj,
+) -> JSONMap:
     """Only pass kwargs that the function can accept (avoids unexpected keyword errors)."""
     sig = inspect.signature(fn)
-    accepted: dict[str, JSONValue] = {}
+    accepted: JSONObj = {}
     for name, val in kwargs.items():
         p = sig.parameters.get(name)
         if p is None:
@@ -169,7 +175,9 @@ def _filter_kwargs(
 
 
 def _log_asset_write(
-    logger: logging.Logger, asset: AssetDecl, merged_params: Mapping[str, JSONValue]
+    logger: logging.Logger,
+    asset: AssetDecl,
+    merged_params: JSONObj,
 ) -> None:
     part_k = asset.partition_key
     part_repr = ""
@@ -225,46 +233,112 @@ def _silence_prefect_console() -> Any:
 
 
 # --- Public API --------------------------------------------------------------
+class PrefectMXMFlow:
+    backend: BackendName = "prefect"
+
+    def __init__(self, name: str, pf_flow: Callable[..., JSONMap]):
+        self.name = name
+        self._pf_flow = pf_flow
+
+    def execute(
+        self,
+        params: JSONObj | None = None,
+        options: RunOptions | None = None,
+    ) -> JSONMap:
+        _ = options
+        # ignore / partially use options for now, e.g. quiet
+        return execute_prefect_flow(self._pf_flow, params=params)
 
 
-def build_prefect_flow(flow_spec: FlowSpec) -> Callable[..., dict[str, Any]]:
+def build_mxm_flow_for_prefect(flow_spec: FlowSpec) -> MXMFlow:
+    pf_flow = build_prefect_flow(flow_spec)
+    return PrefectMXMFlow(name=flow_spec.name, pf_flow=pf_flow)
+
+
+def execute_mxm_flow_for_prefect(
+    flow: MXMFlow,
+    params: JSONObj | None = None,
+    options: RunOptions | None = None,
+) -> JSONMap:
+    return flow.execute(params=params, options=options)
+
+
+def run_mxm_flow_for_prefect(
+    flow_spec: FlowSpec,
+    params: JSONObj | None = None,
+    options: RunOptions | None = None,
+) -> JSONMap:
+    flow = build_mxm_flow_for_prefect(flow_spec)
+    return flow.execute(params=params, options=options)
+
+
+def build_prefect_flow(flow_spec: FlowSpec) -> Callable[..., JSONMap]:
     """
     Build and return a Prefect @flow callable from a FlowSpec.
 
-    Validates (at build time):
-      - duplicate task names
-      - unknown upstream references
-      - dependency cycles
+    This callable, when invoked with runtime params, will:
+    - run tasks in topological order
+    - merge task/flow/runtime params
+    - resolve any futures
+    - log asset writes
 
-    This function does NOT execute any user task code; it only prepares
-    a Prefect flow wrapper. Execution wiring is added in run_prefect_flow.
+    It does *not* apply any global Prefect settings or logging silencing;
+    that is handled by `execute_prefect_flow`.
     """
-    flow = _require_prefect_flow()  # helpful error if Prefect missing
-    by_name = _index_tasks(flow_spec.tasks)  # duplicate names
-    _validate_dependencies(by_name)  # unknowns + cycles
-
-    @flow(name=flow_spec.name)
-    def _mxm_flow(**params: JSONValue) -> dict[str, Any]:
-        # Part A: build-only; return empty mapping to keep tests simple.
-        _ = params
-        return {}
-
-    return _mxm_flow
-
-
-def run_prefect_flow(
-    flow_spec: FlowSpec,
-    params: Mapping[str, JSONValue],
-) -> dict[str, Any]:
-    # Validate spec (dup/unknown/cycle)
-    by_name_validate = _index_tasks(flow_spec.tasks)
-    _validate_dependencies(by_name_validate)
-
-    # Require Prefect and get decorators (this is what your test monkeypatches)
     flow_dec = _require_prefect_flow()
     task_dec = _require_prefect_task()
 
-    # Quiet Prefect's API/UI + reduce logging noise (best-effort)
+    by_name = _index_tasks(flow_spec.tasks)
+    _validate_dependencies(by_name)
+
+    logger = logging.getLogger("mxm.pipeline.adapters.prefect")
+
+    # Build wrappers
+    by_name_map: dict[str, TaskSpec] = {t.name: t for t in flow_spec.tasks}
+    order = _toposort(by_name_map)
+
+    wrapped: dict[str, Callable[..., Any]] = {}
+    for name in order:
+        spec = by_name_map[name]
+        wrapped[name] = task_dec(
+            name=spec.name,
+            retries=max(0, int(spec.retries)),
+            retry_delay_seconds=max(0, int(spec.retry_delay_s)),
+        )(
+            spec.fn
+        )  # type: ignore[misc]
+
+    @flow_dec(name=flow_spec.name)
+    def _mxm_run(**runtime_params: JSONValue) -> JSONMap:
+        results: JSONMap = {}
+        runtime: JSONObj = runtime_params
+        for name in order:
+            spec = by_name_map[name]
+            pos_args: list[Any] = (
+                [results[u] for u in spec.upstream] if spec.upstream else []
+            )
+            merged = _merge_params(spec, flow_spec, runtime)
+            call_kwargs = _filter_kwargs(spec.fn, merged)
+            out = wrapped[name](*pos_args, **call_kwargs)
+            results[name] = _resolve_value(out)
+            if spec.produces is not None:
+                _log_asset_write(logger, spec.produces, merged)
+        return results
+
+    return _mxm_run
+
+
+def execute_prefect_flow(
+    pf_flow: Callable[..., JSONMap],
+    params: JSONObj | None = None,
+) -> JSONMap:
+    """
+    Execute a Prefect @flow callable under MXM's default local settings.
+
+    - Disables Prefect API/UI where possible
+    - Reduces console logging
+    - Silences noisy loggers for pytest/local runs
+    """
     try:
         from prefect.settings import (
             PREFECT_API_ENABLE,
@@ -282,7 +356,6 @@ def run_prefect_flow(
                 PREFECT_LOGGING_TO_CONSOLE: False,
             }
         )
-
     except Exception:
 
         class _NullCtx:
@@ -294,40 +367,5 @@ def run_prefect_flow(
 
         settings_ctx = _NullCtx()  # type: ignore[assignment]
 
-    logger = logging.getLogger("mxm.pipeline.adapters.prefect")
-
-    by_name: dict[str, TaskSpec] = {t.name: t for t in flow_spec.tasks}
-    order = _toposort(by_name)
-
-    wrapped: dict[str, Callable[..., Any]] = {}
-    for name in order:
-        spec = by_name[name]
-        wrapped[name] = task_dec(
-            name=spec.name,
-            retries=max(0, int(spec.retries)),
-            retry_delay_seconds=max(0, int(spec.retry_delay_s)),
-        )(
-            spec.fn
-        )  # type: ignore[misc]
-
-    @flow_dec(name=flow_spec.name)
-    def _mxm_run(**runtime_params: dict[str, JSONValue]) -> dict[str, Any]:
-        results: dict[str, Any] = {}
-        for name in order:
-            spec = by_name[name]
-            pos_args: list[Any] = (
-                [results[u] for u in spec.upstream] if spec.upstream else []
-            )
-            merged = _merge_params(spec, flow_spec, runtime_params)
-            call_kwargs = _filter_kwargs(spec.fn, merged)
-            out = wrapped[name](*pos_args, **call_kwargs)
-            results[name] = _resolve_value(out)
-            if spec.produces is not None:
-                _log_asset_write(logger, spec.produces, merged)
-        return results
-
-    run_fn: Callable[..., dict[str, Any]] = cast(
-        Callable[..., dict[str, Any]], _mxm_run
-    )
     with settings_ctx, _silence_prefect_console():
-        return run_fn(**dict(params))
+        return pf_flow(**dict(params or {}))
