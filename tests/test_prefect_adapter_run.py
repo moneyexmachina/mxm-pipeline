@@ -18,7 +18,7 @@ from collections.abc import Callable
 import pytest
 
 from mxm.pipeline.adapters import prefect_adapter
-from mxm.pipeline.spec import AssetDecl, FlowSpec, TaskSpec
+from mxm.pipeline.spec import FlowSpec, TaskSpec
 
 # --- Helpers ----------------------------------------------------------------
 
@@ -169,19 +169,3 @@ def test_run_parallel_branches_converge_topologically() -> None:
     ic = order.index("C")
     id_ = order.index("D")
     assert ia < ib and ia < ic and ib < id_ and ic < id_
-
-
-def test_run_emits_asset_log_line(caplog: pytest.LogCaptureFixture) -> None:
-    order: list[str] = []
-    asset = AssetDecl(id="mxm/marketdata/ohlc", partition_key="as_of")
-    t = TaskSpec(name="W", fn=make_const(order, "W", 1), produces=asset)
-    spec = FlowSpec(name="assets", tasks=[t])
-    with caplog.at_level("INFO"):
-        results = prefect_adapter.run_mxm_flow_for_prefect(
-            spec, params={"as_of": "2025-11-11"}
-        )
-    assert results["W"] == 1
-    messages = " ".join(r.getMessage() for r in caplog.records)
-    assert "ASSET write" in messages
-    assert "mxm/marketdata/ohlc" in messages
-    assert "partition=as_of:2025-11-11" in messages

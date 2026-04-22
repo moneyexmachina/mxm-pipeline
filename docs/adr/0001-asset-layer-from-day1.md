@@ -1,11 +1,10 @@
 # ADR 0001 — Introduce Optional Asset Layer from Day 1
 
 **Date:** 2025-11-11  
-**Status:** Accepted  
+**Status:** Superseded  
 **Version:** v0.1.0  
 **Package:** `mxm-pipeline`
-
----
+**Superseded by:** ADR 0002 — Task-Centric Execution Model with Semantic Events
 
 ## Context
 
@@ -19,8 +18,6 @@ Task-centric design is simpler and immediately productive; asset-centric design 
 
 We require rapid progress for early data-flows (e.g. `justETF`) **without committing to a heavy asset framework**, while also preserving the ability to evolve naturally toward one later.
 
----
-
 ## Decision
 
 `mxm-pipeline` v0.1.0 will:
@@ -31,15 +28,13 @@ We require rapid progress for early data-flows (e.g. `justETF`) **without commit
 
 This design makes every producing task *asset-aware* but keeps the orchestration logic *task-driven*.
 
----
-
 ## Consequences
 
 ### Positive
-* ✅ Enables **immediate productivity** using Prefect flows.
-* ✅ Creates a **uniform provenance trail**: `_meta.json` for run context + `_asset.json` for persistent state.
-* ✅ Establishes **forward compatibility** with a future asset catalog and materialization planner.
-* ✅ Keeps the system **local-first and backend-agnostic**; the adapter interface can later target Dagster or others.
+* Enables **immediate productivity** using Prefect flows.
+* Creates a **uniform provenance trail**: `_meta.json` for run context + `_asset.json` for persistent state.
+* Establishes **forward compatibility** with a future asset catalog and materialization planner.
+* Keeps the system **local-first and backend-agnostic**; the adapter interface can later target Dagster or others.
 
 ### Neutral / Deferred
 * Catalog ingestion, lineage visualization, and partition management are explicitly out of scope for v0.1.0.
@@ -47,8 +42,6 @@ This design makes every producing task *asset-aware* but keeps the orchestration
 ### Negative
 * Slight additional boilerplate for producing tasks.
 * Risk of conceptual drift if asset metadata is under-used or inconsistent—mitigated by schema validation in `mxm-dataio`.
-
----
 
 ## Alternatives Considered
 
@@ -58,8 +51,6 @@ This design makes every producing task *asset-aware* but keeps the orchestration
 | **Full asset framework (Dagster)** | Strong lineage, partitioning | Heavy dependencies; slower setup | Rejected for v0.1.0 |
 | **Hybrid (chosen)** | Productive now; extensible later | Slight extra metadata burden | **Accepted** |
 
----
-
 ## Implementation Notes
 
 * `TaskSpec.produces: Optional[AssetDecl]` marks an asset-producing task.
@@ -67,15 +58,11 @@ This design makes every producing task *asset-aware* but keeps the orchestration
 * The Prefect adapter ignores asset semantics for now.
 * Future versions (`≥ v0.3.0`) will collect these JSON records into an asset catalog for lineage and re-materialization planning.
 
----
-
 ## Status & Next Steps
 
 * Implemented in `v0.1.0` scaffold.  
 * Will be validated on the reference flow `justETF`.  
 * Catalog ingestion and visualization planned for `v0.3.0`.
-
----
 
 **Decision Owner:** Dr Pendryl Coinwright
 **Reviewers:** MXM Core Maintainers  

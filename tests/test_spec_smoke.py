@@ -1,4 +1,4 @@
-from mxm.pipeline.spec import AssetDecl, FlowSpec, TaskSpec
+from mxm.pipeline.spec import FlowSpec, TaskSpec
 from mxm.types import JSONObj
 
 
@@ -20,15 +20,6 @@ def test_task_spec_defaults():
     # default factories should be *new* objects, not shared
     assert task.params == {}
     assert task.upstream == []
-
-
-def test_asset_decl_defaults():
-    asset = AssetDecl(id="justetf/daily")
-
-    assert asset.id == "justetf/daily"
-    assert asset.partition_key is None
-    assert asset.format == "parquet"
-    assert asset.path_template is None
 
 
 def test_flow_spec_defaults_and_composition():

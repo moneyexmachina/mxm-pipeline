@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from mxm.pipeline.adapters import prefect_adapter
-from mxm.pipeline.spec import AssetDecl, FlowSpec, TaskSpec
+from mxm.pipeline.spec import FlowSpec, TaskSpec
 from mxm.pipeline.types import MXMFlow
 from mxm.types import JSONObj
 
@@ -86,8 +86,7 @@ def test_build_raises_on_cycle() -> None:
 
 def test_build_is_idempotent_and_does_not_mutate_spec() -> None:
     # A5 — Building twice produces two callables and does not mutate spec
-    decl = AssetDecl(id="mxm/marketdata/ohlc", partition_key="as_of")
-    t = TaskSpec(name="t1", fn=_no_op, produces=decl)
+    t = TaskSpec(name="t1", fn=_no_op)
     flow_spec = FlowSpec(name="idempotent-flow", tasks=[t])
 
     # Keep a pristine copy to compare after builds

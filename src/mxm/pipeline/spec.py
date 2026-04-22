@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from mxm.pipeline.types import TaskFn
 from mxm.types import JSONObj
 
-__all__ = ["AssetDecl", "FlowSpec", "TaskSpec"]
+__all__ = ["FlowSpec", "TaskSpec"]
 
 
 # --- typed default factories (avoid Unknown from dict/list) -----------------
@@ -23,14 +23,6 @@ def _empty_task_list() -> list[TaskSpec]:
 
 # --- spec dataclasses -------------------------------------------------------
 @dataclass
-class AssetDecl:
-    id: str
-    partition_key: str | None = None  # e.g. "as_of"
-    format: str = "parquet"
-    path_template: str | None = None  # e.g. ".../{partition}/file.parquet"
-
-
-@dataclass
 class TaskSpec:
     name: str
     fn: TaskFn
@@ -38,7 +30,6 @@ class TaskSpec:
     retry_delay_s: int = 30
     params: JSONObj = field(default_factory=_empty_params)
     upstream: list[str] = field(default_factory=_empty_str_list)
-    produces: AssetDecl | None = None  # optional asset sidecar
 
 
 @dataclass

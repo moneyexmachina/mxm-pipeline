@@ -17,7 +17,7 @@ from typing import (
     runtime_checkable,
 )
 
-from mxm.pipeline.spec import AssetDecl, FlowSpec, TaskSpec
+from mxm.pipeline.spec import FlowSpec, TaskSpec
 from mxm.pipeline.types import BackendName, MXMFlow, RunOptions
 from mxm.types import JSONMap, JSONObj, JSONValue
 
@@ -174,20 +174,6 @@ def _filter_kwargs(
     return accepted
 
 
-def _log_asset_write(
-    logger: logging.Logger,
-    asset: AssetDecl,
-    merged_params: JSONObj,
-) -> None:
-    part_k = asset.partition_key
-    part_repr = ""
-    if part_k is not None:
-        v = merged_params.get(part_k, None)
-        if v is not None:
-            part_repr = f" partition={part_k}:{v}"
-    logger.info(f"ASSET write {asset.id}{part_repr}")
-
-
 def _resolve_value(maybe_future: Any) -> Any:
     """Prefect returns plain values in flows, but if we ever get a future, resolve it."""
     # Simple duck-typing: PrefectFuture has .result()
@@ -291,8 +277,6 @@ def build_prefect_flow(flow_spec: FlowSpec) -> Callable[..., JSONMap]:
     by_name = _index_tasks(flow_spec.tasks)
     _validate_dependencies(by_name)
 
-    logger = logging.getLogger("mxm.pipeline.adapters.prefect")
-
     # Build wrappers
     by_name_map: dict[str, TaskSpec] = {t.name: t for t in flow_spec.tasks}
     order = _toposort(by_name_map)
@@ -321,8 +305,6 @@ def build_prefect_flow(flow_spec: FlowSpec) -> Callable[..., JSONMap]:
             call_kwargs = _filter_kwargs(spec.fn, merged)
             out = wrapped[name](*pos_args, **call_kwargs)
             results[name] = _resolve_value(out)
-            if spec.produces is not None:
-                _log_asset_write(logger, spec.produces, merged)
         return results
 
     return _mxm_run
