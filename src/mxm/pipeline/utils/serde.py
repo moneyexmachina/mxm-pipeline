@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from typing import cast
 
-from mxm.pipeline.reporting.models import RunStatus
 from mxm.types import JSONObj
 from mxm.types.timestamps import TSNSScalar, ts_ns_from_str, ts_ns_to_str
 
@@ -28,20 +27,6 @@ def ts_from_sql(value: str | None) -> TSNSScalar | None:
     if value is None:
         return None
     return ts_ns_from_str(value)
-
-
-def status_to_sql(value: RunStatus) -> str:
-    """
-    Convert RunStatus to SQLite text.
-    """
-    return value.value
-
-
-def status_from_sql(value: str) -> RunStatus:
-    """
-    Parse SQLite text into RunStatus.
-    """
-    return RunStatus(value)
 
 
 def json_to_sql(value: JSONObj) -> str:

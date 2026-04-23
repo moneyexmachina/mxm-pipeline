@@ -35,10 +35,8 @@ class InMemorySemanticEventSink:
 class ExecutionContext:
     flow_run_id: str
     task_run_id: str
-    task_attempt_id: str
     flow_name: str
     task_name: str
-    attempt_number: int
     logger: logging.Logger
     semantic_event_sink: SemanticEventSink
     metadata: JSONObj = field(default_factory=_empty_jsonobj)
@@ -53,7 +51,8 @@ class ExecutionContext:
         event_payload = _empty_jsonobj() if payload is None else payload
         event = SemanticEvent(
             event_id=new_semantic_event_id(),
-            task_attempt_id=self.task_attempt_id,
+            flow_run_id=self.flow_run_id,
+            task_run_id=self.task_run_id,
             event_type=event_type,
             event_ts=utc_now_ts_ns(),
             domain_key=domain_key,

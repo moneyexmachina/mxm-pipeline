@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from mxm.pipeline.reporting.models import RunStatus
 from mxm.pipeline.utils.serde import (
     json_from_sql,
     json_to_sql,
-    status_from_sql,
-    status_to_sql,
     ts_from_sql,
     ts_to_sql,
 )
@@ -26,16 +23,6 @@ def test_ts_sql_round_trip() -> None:
 def test_ts_sql_none_round_trip() -> None:
     assert ts_to_sql(None) is None
     assert ts_from_sql(None) is None
-
-
-def test_status_sql_round_trip() -> None:
-    status = RunStatus.RUNNING
-
-    stored = status_to_sql(status)
-    restored = status_from_sql(stored)
-
-    assert stored == "running"
-    assert restored is RunStatus.RUNNING
 
 
 def test_json_sql_round_trip() -> None:
