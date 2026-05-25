@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mxm-pipeline"
-version = "0.1.0"
+version = "0.1.1"
 description = "\"Pipeline orchestration and operator CLI for Money Ex Machina — Prefect-backed flows, text-first ergonomics, and optional asset metadata.\""
 authors = ["mxm <contact@moneyexmachina.com>"]
 license = "MIT"

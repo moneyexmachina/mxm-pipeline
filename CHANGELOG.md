@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+
+
+## [0.1.1] - 2026-05-25
+
 ### Added
 - `ExecutionContext` runtime injection for task execution.
 - Semantic event emission via `ExecutionContext.emit_semantic_event(...)`.
