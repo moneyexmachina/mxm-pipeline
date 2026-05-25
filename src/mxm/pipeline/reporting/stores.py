@@ -129,6 +129,27 @@ class SemanticEventsStore:
 
         return [self._row_to_semantic_event(row) for row in rows]
 
+    def list_all(self) -> list[SemanticEvent]:
+        self.backend.ensure_migrated()
+
+        with self.backend.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    event_id,
+                    flow_run_id,
+                    task_run_id,
+                    event_type,
+                    event_ts,
+                    domain_key,
+                    payload_json
+                FROM semantic_events
+                ORDER BY event_ts ASC, event_id ASC
+                """
+            ).fetchall()
+
+        return [self._row_to_semantic_event(row) for row in rows]
+
     @staticmethod
     def _row_to_semantic_event(row: Any) -> SemanticEvent:
         return SemanticEvent(

@@ -23,8 +23,8 @@ Exit codes
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
@@ -32,6 +32,7 @@ import typer
 from mxm.pipeline.api import compile_flow, execute_flow
 from mxm.pipeline.graph_ascii import ascii_edges
 from mxm.pipeline.registry import get_flow, get_flows
+from mxm.pipeline.reporting.layout import ReportingLayout
 from mxm.pipeline.spec import FlowSpec
 
 try:
@@ -47,6 +48,19 @@ except Exception:  # pragma: no cover - rich is expected in dev, but guard anywa
 app = typer.Typer(help="mxm-pipeline — operator CLI (demo registry; Prefect local)")
 
 Format = Literal["plain", "rich", "json"]
+
+
+def _reporting_layout_from_ctx(ctx: typer.Context) -> ReportingLayout:
+    """
+    Resolve the reporting layout for CLI-driven local execution.
+
+    Current policy:
+    - if --config is provided, anchor reporting under the config file's parent
+    - otherwise anchor reporting under the current working directory
+    """
+    config: Path | None = ctx.obj.get("config")
+    root = config.parent if config is not None else Path.cwd()
+    return ReportingLayout(root=root)
 
 
 def _parse_params(param_kv: list[str]) -> dict[str, str]:
@@ -214,7 +228,8 @@ def run(
 
     try:
         params = _parse_params(param or [])
-        mxm_flow = compile_flow(spec)
+        reporting_layout = _reporting_layout_from_ctx(ctx)
+        mxm_flow = compile_flow(spec, reporting_layout=reporting_layout)
         result = execute_flow(mxm_flow, params=params)
 
         if fmt == "json":

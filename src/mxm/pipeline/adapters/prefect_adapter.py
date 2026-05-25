@@ -1,22 +1,23 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import os as _os
+from contextlib import contextmanager
 
 # Disable Prefect's console logging/UI/API globally for test & local runs
 _os.environ.setdefault("PREFECT_LOGGING_TO_CONSOLE", "false")
 _os.environ.setdefault("PREFECT_UI_ENABLED", "false")
 _os.environ.setdefault("PREFECT_API_ENABLE", "false")
-from collections.abc import Callable, Iterable, Mapping
+
 import inspect
 import logging
-from typing import (
-    Any,
-    Protocol,
-    TypeVar,
-    runtime_checkable,
-)
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
+from mxm.pipeline.execution.context import ExecutionContext, SemanticEventSink
+from mxm.pipeline.reporting.layout import ReportingLayout
+from mxm.pipeline.reporting.sinks import ReportingSemanticEventSink
+from mxm.pipeline.reporting.sqlite.backend import SQLiteBackend
+from mxm.pipeline.reporting.stores import SemanticEventsStore
 from mxm.pipeline.spec import FlowSpec, TaskSpec
 from mxm.pipeline.types import BackendName, MXMFlow, RunOptions
 from mxm.types import JSONMap, JSONObj, JSONValue
@@ -27,13 +28,18 @@ __all__ = [
 ]
 
 
-# --- Minimal typing for Prefect's @flow decorator ----------------------------
+# --- Minimal typing for Prefect decorators -----------------------------------
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 
 @runtime_checkable
 class _FlowDecorator(Protocol):
+    def __call__(self, *args: Any, **kwargs: Any) -> Callable[[F], F]: ...
+
+
+@runtime_checkable
+class _TaskDecorator(Protocol):
     def __call__(self, *args: Any, **kwargs: Any) -> Callable[[F], F]: ...
 
 
@@ -49,11 +55,30 @@ def _require_prefect_flow() -> _FlowDecorator:
             "Prefect adapter requires the 'orchestration' extra. "
             "Install with: `poetry install -E orchestration`."
         ) from exc
-    # We trust Prefect to satisfy the protocol at runtime.
     return flow  # type: ignore[return-value]
 
 
-# --- Build-time validation helpers ------------------------------------------
+def _require_prefect_task() -> _TaskDecorator:
+    try:
+        from prefect import task  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(
+            "Prefect adapter requires the 'orchestration' extra. "
+            "Install with: `poetry install -E orchestration`."
+        ) from exc
+    return task  # type: ignore[return-value]
+
+
+# --- Build-time validation helpers -------------------------------------------
+def _accepts_execution_context(fn: Callable[..., object]) -> bool:
+    sig = inspect.signature(fn)
+    param = sig.parameters.get("execution_context")
+    if param is None:
+        return False
+    return param.kind in (
+        param.POSITIONAL_OR_KEYWORD,
+        param.KEYWORD_ONLY,
+    )
 
 
 def _index_tasks(tasks: Iterable[TaskSpec]) -> dict[str, TaskSpec]:
@@ -66,7 +91,6 @@ def _index_tasks(tasks: Iterable[TaskSpec]) -> dict[str, TaskSpec]:
 
 
 def _validate_dependencies(by_name: Mapping[str, TaskSpec]) -> None:
-    # Unknown upstreams
     for t in by_name.values():
         for u in t.upstream:
             if u not in by_name:
@@ -74,7 +98,6 @@ def _validate_dependencies(by_name: Mapping[str, TaskSpec]) -> None:
                     f"Unknown upstream {u!r} referenced by task {t.name!r}"
                 )
 
-    # Cycle detection (Kahn's algorithm)
     indeg: dict[str, int] = {n: 0 for n in by_name}
     children: dict[str, set[str]] = {n: set() for n in by_name}
 
@@ -98,29 +121,11 @@ def _validate_dependencies(by_name: Mapping[str, TaskSpec]) -> None:
         raise ValueError("Cycle detected in task dependencies")
 
 
-@runtime_checkable
-class _TaskDecorator(Protocol):
-    def __call__(self, *args: Any, **kwargs: Any) -> Callable[[F], F]: ...
-
-
-def _require_prefect_task() -> _TaskDecorator:
-    try:
-        from prefect import task  # type: ignore
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError(
-            "Prefect adapter requires the 'orchestration' extra. "
-            "Install with: `poetry install -E orchestration`."
-        ) from exc
-    return task  # type: ignore[return-value]
-
-
-# ---------------------------------------------------------------------------
-# Small utilities
+# --- Small utilities ---------------------------------------------------------
 
 
 def _toposort(by_name: Mapping[str, TaskSpec]) -> list[str]:
     """Return a deterministic topological order or raise on cycle."""
-    # indegree and children graph
     indeg: dict[str, int] = {n: 0 for n in by_name}
     children: dict[str, set[str]] = {n: set() for n in by_name}
     for t in by_name.values():
@@ -128,7 +133,6 @@ def _toposort(by_name: Mapping[str, TaskSpec]) -> list[str]:
             indeg[t.name] += 1
             children[u].add(t.name)
 
-    # stable order: process frontier in sorted name order
     frontier: list[str] = sorted(n for n, d in indeg.items() if d == 0)
     order: list[str] = []
 
@@ -162,7 +166,10 @@ def _filter_kwargs(
     fn: Callable[..., Any],
     kwargs: JSONObj,
 ) -> JSONMap:
-    """Only pass kwargs that the function can accept (avoids unexpected keyword errors)."""
+    """
+    Only pass kwargs that the function can accept.
+    This keeps `execution_context` injection optional.
+    """
     sig = inspect.signature(fn)
     accepted: JSONObj = {}
     for name, val in kwargs.items():
@@ -175,19 +182,91 @@ def _filter_kwargs(
 
 
 def _resolve_value(maybe_future: Any) -> Any:
-    """Prefect returns plain values in flows, but if we ever get a future, resolve it."""
-    # Simple duck-typing: PrefectFuture has .result()
+    """
+    Prefect returns plain values in flows, but if we ever get a future, resolve it.
+    """
     res_attr = getattr(maybe_future, "result", None)
     if callable(res_attr):
         try:
             return res_attr()  # type: ignore[misc]
         except Exception:
-            # If not a Prefect future or failed, just return as-is and let caller raise later
             return maybe_future
     return maybe_future
 
 
-# --- Logging silencer for Prefect/Rich console --------------------------------
+def _build_execution_context(
+    *,
+    flow_name: str,
+    task_name: str,
+    semantic_event_sink: SemanticEventSink,
+) -> ExecutionContext:
+    try:
+        from prefect.runtime import flow_run, task_run  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("Prefect runtime context is unavailable.") from exc
+
+    flow_run_id = getattr(flow_run, "id", None)
+    task_run_id = getattr(task_run, "id", None)
+
+    if flow_run_id is None:
+        raise RuntimeError("Missing Prefect flow_run.id in runtime context.")
+    if task_run_id is None:
+        raise RuntimeError("Missing Prefect task_run.id in runtime context.")
+
+    logger = logging.getLogger(f"mxm.pipeline.prefect.{flow_name}.{task_name}")
+
+    return ExecutionContext(
+        flow_run_id=str(flow_run_id),
+        task_run_id=str(task_run_id),
+        flow_name=flow_name,
+        task_name=task_name,
+        logger=logger,
+        semantic_event_sink=semantic_event_sink,
+    )
+
+
+def _call_task_with_optional_execution_context(
+    fn: Callable[..., object],
+    args: tuple[object, ...],
+    kwargs: JSONObj,
+    execution_context: ExecutionContext,
+) -> object:
+    call_kwargs = _filter_kwargs(fn, kwargs)
+
+    if _accepts_execution_context(fn):
+        return fn(*args, **call_kwargs, execution_context=execution_context)
+
+    return fn(*args, **call_kwargs)
+
+
+def _make_prefect_task_runtime_wrapper(
+    *,
+    flow_name: str,
+    task_spec: TaskSpec,
+    semantic_event_sink: SemanticEventSink,
+) -> Callable[..., Any]:
+    def _runtime_wrapper(*args: object, **kwargs: JSONValue) -> object:
+        execution_context = _build_execution_context(
+            flow_name=flow_name,
+            task_name=task_spec.name,
+            semantic_event_sink=semantic_event_sink,
+        )
+
+        return _call_task_with_optional_execution_context(
+            fn=task_spec.fn,
+            args=args,
+            kwargs=dict(kwargs),
+            execution_context=execution_context,
+        )
+
+    _runtime_wrapper.__name__ = task_spec.fn.__name__
+    _runtime_wrapper.__qualname__ = task_spec.fn.__qualname__
+    _runtime_wrapper.__doc__ = task_spec.fn.__doc__
+
+    return _runtime_wrapper
+
+
+# --- Logging silencer for Prefect/Rich console -------------------------------
 
 
 @contextmanager
@@ -219,6 +298,8 @@ def _silence_prefect_console() -> Any:
 
 
 # --- Public API --------------------------------------------------------------
+
+
 class PrefectMXMFlow:
     backend: BackendName = "prefect"
 
@@ -232,12 +313,13 @@ class PrefectMXMFlow:
         options: RunOptions | None = None,
     ) -> JSONMap:
         _ = options
-        # ignore / partially use options for now, e.g. quiet
         return execute_prefect_flow(self._pf_flow, params=params)
 
 
-def build_mxm_flow_for_prefect(flow_spec: FlowSpec) -> MXMFlow:
-    pf_flow = build_prefect_flow(flow_spec)
+def build_mxm_flow_for_prefect(
+    flow_spec: FlowSpec, reporting_layout: ReportingLayout
+) -> MXMFlow:
+    pf_flow = build_prefect_flow(flow_spec, reporting_layout)
     return PrefectMXMFlow(name=flow_spec.name, pf_flow=pf_flow)
 
 
@@ -251,14 +333,17 @@ def execute_mxm_flow_for_prefect(
 
 def run_mxm_flow_for_prefect(
     flow_spec: FlowSpec,
+    reporting_layout: ReportingLayout,
     params: JSONObj | None = None,
     options: RunOptions | None = None,
 ) -> JSONMap:
-    flow = build_mxm_flow_for_prefect(flow_spec)
+    flow = build_mxm_flow_for_prefect(flow_spec, reporting_layout)
     return flow.execute(params=params, options=options)
 
 
-def build_prefect_flow(flow_spec: FlowSpec) -> Callable[..., JSONMap]:
+def build_prefect_flow(
+    flow_spec: FlowSpec, reporting_layout: ReportingLayout
+) -> Callable[..., JSONMap]:
     """
     Build and return a Prefect @flow callable from a FlowSpec.
 
@@ -266,31 +351,36 @@ def build_prefect_flow(flow_spec: FlowSpec) -> Callable[..., JSONMap]:
     - run tasks in topological order
     - merge task/flow/runtime params
     - resolve any futures
-    - log asset writes
+    - inject MXM ExecutionContext into tasks that accept `execution_context`
 
     It does *not* apply any global Prefect settings or logging silencing;
     that is handled by `execute_prefect_flow`.
     """
+    backend = SQLiteBackend(layout=reporting_layout)
+    semantic_events_store = SemanticEventsStore(backend=backend)
+    semantic_event_sink = ReportingSemanticEventSink(store=semantic_events_store)
     flow_dec = _require_prefect_flow()
     task_dec = _require_prefect_task()
 
     by_name = _index_tasks(flow_spec.tasks)
     _validate_dependencies(by_name)
 
-    # Build wrappers
     by_name_map: dict[str, TaskSpec] = {t.name: t for t in flow_spec.tasks}
     order = _toposort(by_name_map)
 
     wrapped: dict[str, Callable[..., Any]] = {}
     for name in order:
         spec = by_name_map[name]
+        runtime_fn = _make_prefect_task_runtime_wrapper(
+            flow_name=flow_spec.name,
+            task_spec=spec,
+            semantic_event_sink=semantic_event_sink,
+        )
         wrapped[name] = task_dec(
             name=spec.name,
             retries=max(0, int(spec.retries)),
             retry_delay_seconds=max(0, int(spec.retry_delay_s)),
-        )(
-            spec.fn
-        )  # type: ignore[misc]
+        )(runtime_fn)
 
     @flow_dec(name=flow_spec.name)
     def _mxm_run(**runtime_params: JSONValue) -> JSONMap:

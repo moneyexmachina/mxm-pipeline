@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 import logging
+from dataclasses import FrozenInstanceError
 
 import pytest
 

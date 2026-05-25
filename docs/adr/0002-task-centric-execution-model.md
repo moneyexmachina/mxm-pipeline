@@ -1,7 +1,7 @@
 # ADR 0002 — Task-Centric Execution Model with Semantic Events
 
 **Date:** 2026-04-15  
-**Status:** Accepted  
+**Status:** Superseded  
 **Version:** v0.2.0 (planned)  
 **Package:** `mxm-pipeline`
 

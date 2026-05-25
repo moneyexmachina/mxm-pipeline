@@ -5,11 +5,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [Unreleased]
-### Added
-- Placeholder for upcoming changes.
+## Unreleased
 
----
+### Added
+- `ExecutionContext` runtime injection for task execution.
+- Semantic event emission via `ExecutionContext.emit_semantic_event(...)`.
+- `SemanticEventSink` abstraction with in-memory and reporting-backed implementations.
+- SQLite-backed semantic event persistence layer.
+- Reporting layouts and semantic event storage utilities.
+- Runtime integration between Prefect task execution and semantic event capture.
+- ADR 0003: “Prefect Owns Operational Truth”.
+
+### Changed
+- Simplified runtime architecture around Prefect-native orchestration.
+- Prefect is now the canonical source of operational execution truth.
+- `mxm-pipeline` now focuses on:
+  - declarative flow specification
+  - Prefect compilation
+  - execution-context injection
+  - semantic event emission
+- README rewritten to reflect the semantic-event execution model.
+- Local execution workflow clarified and documented.
+
+### Removed
+- MXM-owned operational execution reporting model.
+- Independent FlowRun / TaskRun / TaskAttempt persistence concepts.
+- Empty execution runner and scheduler scaffolding.
+- Experimental TUI scaffolding.
+
+### Fixed
+- `mxm-foundry` policy compliance across formatting, typing, and packaging.
+- Prefect runtime integration cleanup and deterministic flow compilation behaviour.
+
+### Notes
+- Current runtime support is focused on local Prefect execution.
+- Deployment-oriented orchestration and worker-pool execution will build on top of Prefect rather than replacing it.
 
 ## [0.1.0] - 2025-12-01
 
@@ -66,7 +96,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 - Asset layer is **present but minimal** at this stage: adapter only tags/logs asset writes; no catalog/freshness/caching yet (slated for M4).
----
 
 <!-- Reference links -->
 [Unreleased]: https://github.com/moneyexmachina/mxm-pipeline/compare/v0.1.0...HEAD

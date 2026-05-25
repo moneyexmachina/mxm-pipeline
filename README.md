@@ -5,18 +5,54 @@
 ![Python](https://img.shields.io/badge/python-3.13+-blue)
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://microsoft.github.io/pyright/)
 [![CI](https://github.com/moneyexmachina/mxm-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/moneyexmachina/mxm-pipeline/actions/workflows/ci.yml)
-**Prefect-backed orchestration • CLI/TUI-first • Provenance everywhere • Optional asset sidecars**
 
-`mxm-pipeline` provides the orchestration core for **Money Ex Machina**.  
-It offers a backend-agnostic model and API for defining, compiling, and executing
-directed workflows (task graphs) using simple declarative specifications.  
-The package is intentionally small, strictly typed, and designed for compositional
-use across the MXM ecosystem, with data pipelines as a primary application but
-no hard dependency on any specific domain.
+Declarative Prefect orchestration substrate with semantic execution events for Money Ex Machina.
 
-The current backend implementation targets **Prefect (local execution)**.  
-Future adapters (Airflow, Dagster, temporal.io, Ray) will plug into the same
-public API.
+`mxm-pipeline` provides a small orchestration layer for defining workflows as declarative task graphs and compiling them into executable Prefect flows.
+
+The package intentionally does **not** implement its own orchestration engine.
+
+Instead:
+
+- Prefect owns operational execution truth
+- `mxm-pipeline` owns semantic execution meaning
+
+The package provides:
+
+- declarative flow specifications (`FlowSpec`, `TaskSpec`)
+- deterministic Prefect flow compilation
+- runtime execution-context injection
+- semantic event emission and persistence
+- CLI utilities for local execution and inspection
+
+The current implementation targets local Prefect execution.
+
+## Purpose
+
+`mxm-pipeline` exists to provide a stable orchestration substrate for MXM systems while keeping orchestration semantics intentionally small and explicit.
+
+The package separates:
+
+- operational execution state
+- semantic/domain meaning
+- logs and execution traces
+
+Operational orchestration concerns are delegated to Prefect:
+
+- flow runs
+- task runs
+- retries
+- scheduling
+- orchestration lifecycle
+
+`mxm-pipeline` augments execution with:
+
+- semantic event emission
+- execution context injection
+- deterministic flow compilation
+- lightweight runtime helpers
+
+The design goal is compositional, inspectable workflows without building a parallel orchestration framework.
 
 ## Installation
 
@@ -24,7 +60,7 @@ public API.
 pip install mxm-pipeline
 ```
 
-To enable orchestration backends (currently Prefect):
+To enable orchestration support:
 
 ```bash
 pip install "mxm-pipeline[orchestration]"
@@ -32,129 +68,216 @@ pip install "mxm-pipeline[orchestration]"
 
 Requires **Python 3.13+**.
 
-## Quick Start
+## Usage
 
-### 1. List available flows
+### Define tasks
+
+```python
+from mxm.pipeline.spec import FlowSpec, TaskSpec
+
+
+def produce_number(x: int) -> int:
+    return x * 2
+
+
+def consume_number(
+    value: int,
+    *,
+    execution_context,
+) -> int:
+    execution_context.emit_semantic_event(
+        event_type="value_consumed",
+        domain_key="demo.value",
+        payload={"value": value},
+    )
+
+    return value + 1
+```
+
+### Define a flow
+
+```python
+flow = FlowSpec(
+    name="demo",
+    tasks=[
+        TaskSpec(
+            name="produce",
+            fn=produce_number,
+            params={"x": 4},
+        ),
+        TaskSpec(
+            name="consume",
+            fn=consume_number,
+            upstream=["produce"],
+        ),
+    ],
+)
+```
+
+### Compile and execute
+
+```python
+from mxm.pipeline.api import compile_flow, execute_flow
+from mxm.pipeline.reporting.layout import ReportingLayout
+
+layout = ReportingLayout.from_root("./runtime")
+
+compiled = compile_flow(
+    flow,
+    reporting_layout=layout,
+)
+
+result = execute_flow(compiled)
+
+print(result)
+```
+
+### CLI usage
+
+List flows:
 
 ```bash
 mxm-pipeline list
 ```
 
-### 2. Visualise a flow graph
+Show dependency graph:
 
 ```bash
 mxm-pipeline graph demo
 ```
 
-### 3. Run a flow
+Run a flow:
 
 ```bash
-mxm-pipeline run demo --param x=4 --param y=7
+mxm-pipeline run demo --param x=4
 ```
 
-### 4. Use the API directly
+## Runtime Model
 
-```python
-from mxm.pipeline import api
-from mxm.pipeline.registry import get_flow
+The runtime model is intentionally small:
 
-spec = get_flow("demo")
-flow = api.compile_flow(spec)
-result = api.execute_flow(flow, {"x": 4, "y": 7})
-
-print(result)
+```text
+FlowSpec
+  ↓
+Prefect FlowRun
+  ↓
+Prefect TaskRun
+  ↓
+MXM ExecutionContext
+  ↓
+SemanticEvent(s)
 ```
 
-The API always returns a `dict[str, JSONValue]` mapping task names to results.
+`ExecutionContext` is injected into tasks that accept an `execution_context` argument.
 
+The context provides:
 
-## How It Works
+- Prefect runtime identifiers
+- logging access
+- semantic event emission
+- lightweight execution metadata
 
-`mxm-pipeline` is structured into **three explicit layers**:
+The context does not own orchestration state.
 
-### 1. Spec Layer (`spec.py`)
+## Semantic Events
 
-Defines the declarative building blocks of a pipeline:
+Semantic events are append-only domain records emitted during execution.
 
-- `TaskSpec`
+Examples:
+
+- dataset materialized
+- partial coverage obtained
+- degraded upstream state
+- stale reference data detected
+- validation failure
+- no-op execution
+
+Principle:
+
+> operational records say what happened  
+> semantic events say what it meant  
+> logs say how it unfolded
+
+Semantic events are persisted independently from Prefect operational state.
+
+## Architecture
+
+`mxm-pipeline` is structured into four primary layers.
+
+### 1. Specification Layer
+
+Declarative workflow definitions:
+
 - `FlowSpec`
-- `AssetDecl`
+- `TaskSpec`
 
-A flow describes tasks, dependencies, parameters, and assets without reference
-to any execution engine.
+Tasks define executable units and dependencies without embedding orchestration logic.
 
-### 2. API Layer (`api.py`)
+### 2. API Layer
 
-The public interface:
+Public orchestration interface:
 
-- `compile_flow(spec) -> MXMFlow`
-- `execute_flow(flow, params) -> dict[str, JSONValue]`
+- `compile_flow()`
+- `execute_flow()`
 
-This layer is backend-neutral.  
-It hides Prefect (or any future orchestration system) from callers.
+This layer hides backend implementation details from callers.
 
-### 3. Adapter Layer (`adapters/`)
+### 3. Adapter Layer
 
-Each backend implements:
+Backend-specific compilation and execution.
 
-- `build_*_flow(spec)`
-- `execute_*_flow()`
-- An `MXMFlow` wrapper exposing a uniform interface.
+Current implementation:
 
-The current implementation is:
-
-```
+```text
 adapters/prefect_adapter.py
 ```
 
-It performs deterministic flow construction, retry management, parameter merging,
-asset logging, and dependency resolution.
+The adapter:
 
-## Registry
+- validates task graphs
+- compiles Prefect flows/tasks
+- injects execution contexts
+- manages semantic event sinks
+- executes flows under MXM runtime defaults
 
-Flows are registered via:
+### 4. Reporting Layer
 
-```python
-from mxm.pipeline.registry import register_flow
-```
+Semantic event persistence and reporting utilities.
 
-All registered flows appear automatically in the CLI:
+Current implementation includes:
 
-```bash
-mxm-pipeline list
-```
+- semantic event models
+- append-only semantic event storage
+- SQLite-backed persistence
+- reporting layouts and sinks
 
-This allows packages within the MXM ecosystem to expose flows without importing
-Prefect or the adapter layer.
+The reporting layer intentionally does not duplicate Prefect orchestration state.
 
-## Status and Scope
+## Design Principles
 
-The package is stable for local execution and suitable for programmatic use in
-other MXM components.
+- **Prefect owns operational truth**  
+  MXM does not reimplement orchestration state management.
 
-Out of scope for `v0.1.0`:
+- **Semantic meaning is explicit**  
+  Domain outcomes are emitted as structured semantic events.
 
-- Distributed or cloud execution
-- Asset cataloguing and freshness policies (scheduled for M4)
-- Workflow scheduling and event-driven triggers
-- UI or dashboard layers
+- **Declarative flow construction**  
+  Workflows are defined as task graphs rather than imperative orchestration code.
 
-The design emphasises simplicity, transparency, and reliability for development
-and research workflows.
+- **Minimal runtime abstraction**  
+  The package avoids building a general-purpose orchestration framework.
 
-## Roadmap
+- **Strict typing**  
+  Fully Pyright-clean and PEP 561 compliant.
 
-- M2.2 — Backend failsafe, error modes, structured runtime logs
-- M3 — Event-driven orchestration, enriched CLI, DAG export formats
-- M4 — Full asset layer (catalogue, caching, partitioning, freshness)
-- M5 — Multi-backend support (Airflow, Ray, Dagster)
-- M6 — Operators / runtime console for the Money Machine
+- **Deterministic execution structure**  
+  Task ordering and graph validation are stable and explicit.
 
 ## Development
 
-Format, lint, type-check, and test the project:
-
 ```bash
+poetry install
+
 make check
 ```
 
@@ -166,6 +289,21 @@ All code is required to pass:
 - `pyright` (strict)
 - `pytest`
 
+## ADRs
+
+Architecture decisions are documented under:
+
+```text
+docs/adr/
+```
+
+Current ADR sequence:
+
+- ADR 0001 — Optional asset layer from day 1
+- ADR 0002 — Task-centric execution model with semantic events
+- ADR 0003 — Prefect owns operational truth
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).
+
