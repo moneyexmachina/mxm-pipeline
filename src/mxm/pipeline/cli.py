@@ -96,7 +96,7 @@ def _main_options(  # pyright: ignore[reportUnusedFunction]
     ctx: typer.Context,
     format: Annotated[
         Format,
-        typer.Option(
+        typer.Option(  # type: ignore[reportUnknownMemberType]
             "--format",
             "-f",
             case_sensitive=False,
@@ -105,14 +105,14 @@ def _main_options(  # pyright: ignore[reportUnusedFunction]
     ] = "plain",
     quiet: Annotated[
         bool,
-        typer.Option(
+        typer.Option(  # type: ignore[reportUnknownMemberType]
             "--quiet/--no-quiet",
             help="Suppress Prefect API/UI/logging (default: --quiet).",
         ),
     ] = True,
     config: Annotated[
         Path | None,
-        typer.Option(
+        typer.Option(  # type: ignore[reportUnknownMemberType]
             "--config",
             "-c",
             help="(Reserved) Path to mxm-config file for defaults (future use).",
@@ -199,7 +199,7 @@ def run(
     flow: Annotated[str, typer.Argument(..., help="Flow name")],  # type: ignore[reportUnknownMemberType]
     param: Annotated[
         list[str] | None,
-        typer.Option(
+        typer.Option(  # type: ignore[reportUnknownMemberType]
             "--param",
             "-p",
             help="Flow parameter in k=v form (repeatable; later overrides earlier).",
