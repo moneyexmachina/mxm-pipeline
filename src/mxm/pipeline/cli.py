@@ -156,7 +156,8 @@ def list_flows(ctx: typer.Context) -> None:
 
 @app.command("graph")
 def graph(
-    ctx: typer.Context, flow: str = typer.Argument(..., help="Flow name")
+    ctx: typer.Context,
+    flow: str = typer.Argument(..., help="Flow name"),  # type: ignore[reportUnknownMemberType]
 ) -> None:
     """
     Print flow DAG edges.
@@ -195,7 +196,7 @@ def graph(
 @app.command("run")
 def run(
     ctx: typer.Context,
-    flow: Annotated[str, typer.Argument(..., help="Flow name")],
+    flow: Annotated[str, typer.Argument(..., help="Flow name")],  # type: ignore[reportUnknownMemberType]
     param: Annotated[
         list[str] | None,
         typer.Option(

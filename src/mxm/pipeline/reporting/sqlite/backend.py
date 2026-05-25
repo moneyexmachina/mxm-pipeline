@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,7 +72,7 @@ class SQLiteBackend:
                     )
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
+    def transaction(self) -> Generator[sqlite3.Connection]:
         """
         Public transaction context manager: yields a migrated connection
         and wraps the body in a BEGIN/COMMIT (rollback on exception).
@@ -83,7 +83,7 @@ class SQLiteBackend:
                 yield conn
 
     @contextmanager
-    def transaction_no_migrate(self) -> Iterator[sqlite3.Connection]:
+    def transaction_no_migrate(self) -> Generator[sqlite3.Connection]:
         with self.connect() as conn:
             with self._transaction(conn):
                 yield conn
@@ -112,7 +112,7 @@ class SQLiteBackend:
 
     @staticmethod
     @contextmanager
-    def _transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    def _transaction(conn: sqlite3.Connection) -> Generator[None]:
         try:
             conn.execute("BEGIN;")
             yield
